@@ -45,6 +45,7 @@ def train(hyp, opt, device, tb_writer=None):
 
     # Directories
     # 设置保存权重的路径
+    # save_dir = runs/trian/exp  ;  opt.project(default: runs/train)/opt.name(default : exp)
     wdir = save_dir / 'weights'
     wdir.mkdir(parents=True, exist_ok=True)  # make dir
     last = wdir / 'last.pt'
@@ -65,6 +66,7 @@ def train(hyp, opt, device, tb_writer=None):
     # 设置随机数种子
     init_seeds(2 + rank)
     # 加载数据配置信息 yaml文件
+    # opt.data = data/coco128.yaml
     with open(opt.data) as f:
         data_dict = yaml.load(f, Loader=yaml.SafeLoader)  # data dict
     is_coco = opt.data.endswith('coco.yaml')
@@ -91,11 +93,11 @@ def train(hyp, opt, device, tb_writer=None):
         # check_dataset检查数据集，如果没找到数据集则下载数据集(仅适用于项目中自带的yaml文件数据集)
         with torch_distributed_zero_first(rank):
             attempt_download(weights)  # download if not found locally
-        ckpt = torch.load(weights, map_location=device)  # load checkpoint
+        # load checkpoint and 重新映射到另一个设备
+        ckpt = torch.load(weights, map_location=device)  # load checkpoint 
         """
         这里模型创建，可通过opt.cfg，也可通过ckpt['model'].yaml
-        这里的区别在于是否是resume，resume时会将opt.cfg设为空，
-        则按照ckpt['model'].yaml创建模型；
+        这里的区别在于是否是resume，resume时会将opt.cfg设为空， 则按照ckpt['model'].yaml创建模型；
         这也影响着下面是否除去anchor的key(也就是不加载anchor)，
         如果resume，则加载权重中保存的anchor来继续训练；
         主要是预训练权重里面保存了默认coco数据集对应的anchor，
@@ -105,7 +107,9 @@ def train(hyp, opt, device, tb_writer=None):
         参考https://github.com/ultralytics/yolov5/issues/459
         所以下面设置了intersect_dicts，该函数就是忽略掉exclude中的键对应的值
         """
+        # opt.cfg= yolov5s.yaml
         model = Model(opt.cfg or ckpt['model'].yaml, ch=3, nc=nc, anchors=hyp.get('anchors')).to(device)  # create
+        # 去除预训练模型中的anchors， 只有从头训练并且配置文件（yolo.yaml)中或者是超参数中设定anchors时才会排除模型中的anchors
         exclude = ['anchor'] if (opt.cfg or hyp.get('anchors')) and not opt.resume else []  # exclude keys
         state_dict = ckpt['model'].float().state_dict()  # to FP32
         state_dict = intersect_dicts(state_dict, model.state_dict(), exclude=exclude)  # intersect
@@ -116,6 +120,7 @@ def train(hyp, opt, device, tb_writer=None):
     else:
         model = Model(opt.cfg, ch=3, nc=nc, anchors=hyp.get('anchors')).to(device)  # create
     with torch_distributed_zero_first(rank):
+        # 检查数据集，如果没有找到相关的数据集则下载数据集
         check_dataset(data_dict)  # check
     train_path = data_dict['train']
     test_path = data_dict['val']
@@ -160,20 +165,23 @@ def train(hyp, opt, device, tb_writer=None):
     optimizer.add_param_group({'params': pg1, 'weight_decay': hyp['weight_decay']})  # add pg1 with weight_decay
     # 设置biases的优化方式
     optimizer.add_param_group({'params': pg2})  # add pg2 (biases)
+    # 记录优化信息
     logger.info('Optimizer groups: %g .bias, %g conv.weight, %g other' % (len(pg2), len(pg1), len(pg0)))
     del pg0, pg1, pg2
 
     # Scheduler https://arxiv.org/pdf/1812.01187.pdf
     # https://pytorch.org/docs/stable/_modules/torch/optim/lr_scheduler.html#OneCycleLR
+    # 设置学习率衰减，
     if opt.linear_lr:
         lf = lambda x: (1 - x / (epochs - 1)) * (1.0 - hyp['lrf']) + hyp['lrf']  # linear
     else:
         lf = one_cycle(1, hyp['lrf'], epochs)  # cosine 1->hyp['lrf']
+    # 设置学习率调整策略为  自定义调整
     scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=lf)
     # plot_lr_scheduler(optimizer, scheduler, epochs)
 
     # EMA
-    # 为gpu创建EMA质数平均滑动，如果gpu进程数大于1， 则不创建
+    # 为gpu创建EMA指数滑动平均，如果gpu进程数大于1， 则不创建
     ema = ModelEMA(model) if rank in [-1, 0] else None
 
     # Resume
@@ -212,10 +220,14 @@ def train(hyp, opt, device, tb_writer=None):
     # 获取模型总步长和模型输入图片分辨率
     gs = max(int(model.stride.max()), 32)  # grid size (max stride)
     nl = model.model[-1].nl  # number of detection layers (used for scaling hyp['obj'])
-    # 检查输入图片分辨率却把能够整除总步长gs
+    # 检查输入图片分辨率确保能够整除总步长gs
     imgsz, imgsz_test = [check_img_size(x, gs) for x in opt.img_size]  # verify imgsz are gs-multiples
 
     # DP mode
+    # 分布式训练,参照:https://github.com/ultralytics/yolov5/issues/475
+    # DataParallel模式,仅支持单机多卡
+    # rank为进程编号, 这里应该设置为rank=-1则使用DataParallel模式
+    # rank=-1且gpu数量=1时,不会进行分布式
     if cuda and rank == -1 and torch.cuda.device_count() > 1:
         model = torch.nn.DataParallel(model)
 
@@ -230,10 +242,8 @@ def train(hyp, opt, device, tb_writer=None):
                                             hyp=hyp, augment=True, cache=opt.cache_images, rect=opt.rect, rank=rank,
                                             world_size=opt.world_size, workers=opt.workers,
                                             image_weights=opt.image_weights, quad=opt.quad, prefix=colorstr('train: '))
-    """
-    获取标签中最大的类别值，并于类别数作比较
-    如果大于类别数则表示有问题
-    """
+    
+    # 获取标签中最大的类别值，并于类别数作比较， 如果大于类别数则表示有问题
     mlc = np.concatenate(dataset.labels, 0)[:, 0].max()  # max label class
     nb = len(dataloader)  # number of batches
     assert mlc < nc, 'Label class %g exceeds nc=%g in %s. Possible class labels are 0-%g' % (mlc, nc, opt.data, nc - 1)
@@ -253,7 +263,7 @@ def train(hyp, opt, device, tb_writer=None):
             # cf = torch.bincount(c.long(), minlength=nc) + 1.  # frequency
             # model._initialize_biases(cf.to(device))
             if plots:
-                # 根据上面的统计对所有样本的类别，中心点xy位置，长款wh做可视化。
+                # 根据上面的统计对所有样本的类别，中心点xy位置，长宽wh做可视化。
                 plot_labels(labels, names, save_dir, loggers)
                 if tb_writer:
                     tb_writer.add_histogram('classes', c, 0)
@@ -289,7 +299,7 @@ def train(hyp, opt, device, tb_writer=None):
 
     # Start training
     t0 = time.time()
-    # 获取热身训练的迭代次数
+    # 获取热身训练的迭代次数， nb : number of batchs
     nw = max(round(hyp['warmup_epochs'] * nb), 1000)  # number of warmup iterations, max(3 epochs, 1k iterations)
     # nw = min(nw, (epochs - start_epoch) / 2 * nb)  # limit warmup to < 1/2 of training
     # 初始化mAP和results

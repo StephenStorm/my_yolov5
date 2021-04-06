@@ -62,7 +62,7 @@ class Detect(nn.Module):
         yv, xv = torch.meshgrid([torch.arange(ny), torch.arange(nx)])
         return torch.stack((xv, yv), 2).view((1, 1, ny, nx, 2)).float()
 
-
+# model = Model(opt.cfg or ckpt['model'].yaml, ch=3, nc=nc, anchors=hyp.get('anchors')).to(device)
 class Model(nn.Module):
     def __init__(self, cfg='yolov5s.yaml', ch=3, nc=None, anchors=None):  # model, input channels, number of classes
         super(Model, self).__init__()
