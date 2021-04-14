@@ -112,8 +112,14 @@ class ComputeLoss:
             setattr(self, k, getattr(det, k))
 
     def __call__(self, p, targets):  # predictions, targets, model
+        '''
+        p:网络输出 [batch_size, num_anchors, h, w, bbox + 1 + cls] * 3
+        target: labels [num_labels, image_index + cls_id + bbox]
+        '''
         device = targets.device
+
         lcls, lbox, lobj = torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device)
+        # tcls:  类别， tbox： 坐标偏移量和wh， indices: image, anchor, grid indices ; anchors :锚框
         tcls, tbox, indices, anchors = self.build_targets(p, targets)  # targets
 
         # Losses
@@ -126,7 +132,8 @@ class ComputeLoss:
                 ps = pi[b, a, gj, gi]  # prediction subset corresponding to targets
 
                 # Regression
-                pxy = ps[:, :2].sigmoid() * 2. - 0.5
+                # *2 为了进行对靠近网络边界点的目标进行检测
+                pxy = ps[:, :2].sigmoid() * 2. - 0.5 # bbox 中心点位置
                 pwh = (ps[:, 2:4].sigmoid() * 2) ** 2 * anchors[i]
                 pbox = torch.cat((pxy, pwh), 1)  # predicted box
                 iou = bbox_iou(pbox.T, tbox[i], x1y1x2y2=False, CIoU=True)  # iou(prediction, target)
@@ -162,6 +169,16 @@ class ComputeLoss:
 
     def build_targets(self, p, targets):
         # Build targets for compute_loss(), input targets(image,class,x,y,w,h)
+        """
+        p: 网络输出[batch_size, num_anchors, h, w, bbox + 1 + cls] * 3
+        target: labels [num_labels, image_index + cls_id + bbox]
+        model: yolov5
+
+        这个函数用来构建计算损失的目标值
+        1.先找出哪些真实框是由哪些锚框负责预测的， 给相应的真实框添加锚框索引
+        2.再找出哪些网格是负责预测的，例如label中的中心点坐标在网格中偏左下方，就由当前网格和他的左侧和下方网格一起用来预测目标
+        3.根据1和2将结果存储在变量tcls, tbox, indices, anch中
+        """
         na, nt = self.na, targets.shape[0]  # number of anchors, targets
         tcls, tbox, indices, anch = [], [], [], []
         gain = torch.ones(7, device=targets.device)  # normalized to gridspace gain
@@ -188,12 +205,20 @@ class ComputeLoss:
                 t = t[j]  # filter
 
                 # Offsets
-                gxy = t[:, 2:4]  # grid xy
-                gxi = gain[[2, 3]] - gxy  # inverse
+                # 找到这是框的中心点，再添加两个距离它最近的两个点也作为正样本
+                # 参考博文https://blog.csdn.net/cdknight_happy/article/details/109817548#t11
+                # x小于0.5就靠近左边的网格，y小于0.5就靠近上边的网格
+                gxy = t[:, 2:4]  # grid xy  真实框中心坐标x, y
+                gxi = gain[[2, 3]] - gxy  # inverse 求反，通过下面的判断求出中心点便宜的方向
+                # gxy % 1 意思是求得坐标xy后的小数点，也就是相对于每个网格的偏移量 j 代表x,  k代表y
                 j, k = ((gxy % 1. < g) & (gxy > 1.)).T
+                # gxi % 1 < g  偏移量不能超过0.5
                 l, m = ((gxi % 1. < g) & (gxi > 1.)).T
+                # [5, num_targets] 包括target中心点和它的四个相邻网络（下右上左）
                 j = torch.stack((torch.ones_like(j), j, k, l, m))
+                # [num_targets * 3, 7] 标签数量 * 3
                 t = t.repeat((5, 1, 1))[j]
+                # 选择网络
                 offsets = (torch.zeros_like(gxy)[None] + off[:, None])[j]
             else:
                 t = targets[0]
@@ -209,8 +234,11 @@ class ComputeLoss:
             # Append
             a = t[:, 6].long()  # anchor indices
             indices.append((b, a, gj.clamp_(0, gain[3] - 1), gi.clamp_(0, gain[2] - 1)))  # image, anchor, grid indices
+            # box, 添加真实框的中心点坐标仙姑低于坐在网格的偏移量， 宽高
             tbox.append(torch.cat((gxy - gij, gwh), 1))  # box
+            # 添加锚框
             anch.append(anchors[a])  # anchors
+            # 添加 cls_id
             tcls.append(c)  # class
 
         return tcls, tbox, indices, anch
