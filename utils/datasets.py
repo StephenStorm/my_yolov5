@@ -89,6 +89,7 @@ class InfiniteDataLoader(torch.utils.data.dataloader.DataLoader):
     """ Dataloader that reuses workers
 
     Uses same syntax as vanilla DataLoader
+    对Dataloader进行封装，就是为了能够永久持续的采样数据
     """
 
     def __init__(self, *args, **kwargs):
@@ -337,10 +338,25 @@ def img2label_paths(img_paths):
     sa, sb = os.sep + 'images' + os.sep, os.sep + 'labels' + os.sep  # /images/, /labels/ substrings
     return ['txt'.join(x.replace(sa, sb, 1).rsplit(x.split('.')[-1], 1)) for x in img_paths]
 
-
+# 数据集加载和增强。
 class LoadImagesAndLabels(Dataset):  # for training/testing
     def __init__(self, path, img_size=640, batch_size=16, augment=False, hyp=None, rect=False, image_weights=False,
                  cache_images=False, single_cls=False, stride=32, pad=0.0, prefix=''):
+        '''
+        path: 数据集路径
+        img_size : 图片大小，args.img_size
+        batch_size:
+        augment: 是否进行数据增强
+        hyp： 超参数的yaml文件
+        rect: 矩形训练，就是对图片填充灰边（只在高或宽的一遍填充）
+        image_weights: 图像采样的权重
+        cache_images: 图片是否缓存，用于加速训练
+        single_cls: 是否是一个类别
+        stride：模型步幅，图像大小  / 网络下采样之后的输出大小
+        pad: 填充宽度
+        rank：当前进程编号
+
+        '''
         self.img_size = img_size
         self.augment = augment
         self.hyp = hyp
@@ -351,6 +367,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         self.stride = stride
         self.path = path
 
+        # 读取图像路径，转换成合适的格式
         try:
             f = []  # image files
             for p in path if isinstance(path, list) else [path]:
@@ -373,6 +390,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             raise Exception(f'{prefix}Error loading data from {path}: {e}\nSee {help_url}')
 
         # Check cache
+        # 图片路径到label路径的转换。
         self.label_files = img2label_paths(self.img_files)  # labels
         cache_path = (p if p.is_file() else Path(self.label_files[0]).parent).with_suffix('.cache')  # cached labels
         if cache_path.is_file():
@@ -414,6 +432,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             s = self.shapes  # wh
             ar = s[:, 1] / s[:, 0]  # aspect ratio
             irect = ar.argsort()
+            # 重新排序图片，label路径，真实框，shapes， 宽高比的排序
             self.img_files = [self.img_files[i] for i in irect]
             self.label_files = [self.label_files[i] for i in irect]
             self.labels = [self.labels[i] for i in irect]
@@ -425,15 +444,17 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             for i in range(nb):
                 ari = ar[bi == i]
                 mini, maxi = ari.min(), ari.max()
+                # 下边的操作是为了保证shapes存储的值始终 <1 ，即只对简短的一边进行操作
                 if maxi < 1:
                     shapes[i] = [maxi, 1]
                 elif mini > 1:
                     shapes[i] = [1, 1 / mini]
-
+            # 下边的操作就是为了得到以stride为整数倍的图像大小（较短的一边）注意：只在测试时才会用到
             self.batch_shapes = np.ceil(np.array(shapes) * img_size / stride + pad).astype(np.int) * stride
 
         # Cache images into memory for faster training (WARNING: large datasets may exceed system RAM)
         self.imgs = [None] * n
+        # 缓存图像到内存中，为了快速训练, 通过调用8个线程，读取图像并进行resize处理，保存在self.imgs变量中
         if cache_images:
             gb = 0  # Gigabytes of cached images
             self.img_hw0, self.img_hw = [None] * n, [None] * n
@@ -447,6 +468,9 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             
     def cache_labels(self, path=Path('./labels.cache'), prefix=''):
         # Cache dataset labels, check images and read shapes
+        '''
+        检测image 和 label有没有损坏
+        '''
         x = {}  # dict
         nm, nf, ne, nc = 0, 0, 0, 0  # number missing, found, empty, duplicate
         pbar = tqdm(zip(self.img_files, self.label_files), desc='Scanning images', total=len(self.img_files))
@@ -510,16 +534,22 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
     #     return self
 
     def __getitem__(self, index):
+        '''
+        进行mosaic数据增强
+
+        '''
         index = self.indices[index]  # linear, shuffled, or image_weights
 
         hyp = self.hyp
         mosaic = self.mosaic and random.random() < hyp['mosaic']
         if mosaic:
             # Load mosaic
+            # mosaic 数据增强。
             img, labels = load_mosaic(self, index)
             shapes = None
 
             # MixUp https://arxiv.org/pdf/1710.09412.pdf
+            # 将两幅图片混合在一起，每幅图片包含4张小图
             if random.random() < hyp['mixup']:
                 img2, labels2 = load_mosaic(self, random.randint(0, self.n - 1))
                 r = np.random.beta(8.0, 8.0)  # mixup ratio, alpha=beta=8.0
@@ -537,6 +567,8 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
 
             labels = self.labels[index].copy()
             if labels.size:  # normalized xywh to pixel xyxy format
+                # 将标签格式[centerx, centery, w, h]转换为[xim, ymin, xmax, ymax],
+                # 并调整为未归一化的格式(图片上真实坐标), 坐标平移调整
                 labels[:, 1:] = xywhn2xyxy(labels[:, 1:], ratio[0] * w, ratio[1] * h, padw=pad[0], padh=pad[1])
 
         if self.augment:
@@ -587,6 +619,10 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
 
     @staticmethod
     def collate_fn(batch):
+        """
+        pytorch的DataLoader打包一个batch的数据集时要经过此函数进行打包
+        通过重写此函数实现标签与图片对应的划分，一个batch中哪些标签属于哪一张图片
+        """
         img, label, path, shapes = zip(*batch)  # transposed
         for i, l in enumerate(label):
             l[:, 0] = i  # add target image index for build_targets()
@@ -667,28 +703,39 @@ def load_mosaic(self, index):
 
     labels4, segments4 = [], []
     s = self.img_size
+    # 随机选取 mosaic的中心点
     yc, xc = [int(random.uniform(-x, 2 * s + x)) for x in self.mosaic_border]  # mosaic center x, y
+    # 随机添加剩余3张图像序列
     indices = [index] + random.choices(self.indices, k=3)  # 3 additional image indices
     for i, index in enumerate(indices):
         # Load image
         img, _, (h, w) = load_image(self, index)
 
         # place img in img4
+        #融合四张图片
         if i == 0:  # top left
+            # 左上角图片， 114代表灰色
             img4 = np.full((s * 2, s * 2, img.shape[2]), 114, dtype=np.uint8)  # base image with 4 tiles
+            # 当前图像在一张大图上的位置
             x1a, y1a, x2a, y2a = max(xc - w, 0), max(yc - h, 0), xc, yc  # xmin, ymin, xmax, ymax (large image)
+            # 选取当前图像的位置
             x1b, y1b, x2b, y2b = w - (x2a - x1a), h - (y2a - y1a), w, h  # xmin, ymin, xmax, ymax (small image)
         elif i == 1:  # top right
+            # 右上角图片
             x1a, y1a, x2a, y2a = xc, max(yc - h, 0), min(xc + w, s * 2), yc
             x1b, y1b, x2b, y2b = 0, h - (y2a - y1a), min(w, x2a - x1a), h
         elif i == 2:  # bottom left
+            #左下角图片
             x1a, y1a, x2a, y2a = max(xc - w, 0), yc, xc, min(s * 2, yc + h)
             x1b, y1b, x2b, y2b = w - (x2a - x1a), 0, w, min(y2a - y1a, h)
         elif i == 3:  # bottom right
+            # 右下角图片
             x1a, y1a, x2a, y2a = xc, yc, min(xc + w, s * 2), min(s * 2, yc + h)
             x1b, y1b, x2b, y2b = 0, 0, min(w, x2a - x1a), min(y2a - y1a, h)
 
+        # 将当前图像上的候选区域赋值给大图上设置好的区域
         img4[y1a:y2a, x1a:x2a] = img[y1b:y2b, x1b:x2b]  # img4[ymin:ymax, xmin:xmax]
+        # 截取之后的图像相对于原始图像的偏移量。
         padw = x1a - x1b
         padh = y1a - y1b
 
@@ -703,10 +750,12 @@ def load_mosaic(self, index):
     # Concat/clip labels
     labels4 = np.concatenate(labels4, 0)
     for x in (labels4[:, 1:], *segments4):
+        # 对大图进行裁剪，对超出图像边界的值赋予0或者img_size
         np.clip(x, 0, 2 * s, out=x)  # clip when using random_perspective()
     # img4, labels4 = replicate(img4, labels4)  # replicate
 
     # Augment
+    # 对图像和标签进行平移，旋转，透视等等处理。
     img4, labels4 = random_perspective(img4, labels4, segments4,
                                        degrees=self.hyp['degrees'],
                                        translate=self.hyp['translate'],
@@ -811,16 +860,27 @@ def replicate(img, labels):
 
 def letterbox(img, new_shape=(640, 640), color=(114, 114, 114), auto=True, scaleFill=False, scaleup=True, stride=32):
     # Resize and pad image while meeting stride-multiple constraints
+    '''
+    自适应缩放图片
+    调整图片大小，达到32的最小倍数。
+
+
+
+    '''
     shape = img.shape[:2]  # current shape [height, width]
     if isinstance(new_shape, int):
         new_shape = (new_shape, new_shape)
 
     # Scale ratio (new / old)
     r = min(new_shape[0] / shape[0], new_shape[1] / shape[1])
+    """
+       缩放(resize)到输入大小img_size的时候，如果没有设置上采样的话，则只进行下采样
+       因为上采样图片会让图片模糊，对训练不友好影响性能。
+    """
     if not scaleup:  # only scale down, do not scale up (for better test mAP)
         r = min(r, 1.0)
 
-    # Compute padding
+    # Compute paddings
     ratio = r, r  # width, height ratios
     new_unpad = int(round(shape[1] * r)), int(round(shape[0] * r))
     dw, dh = new_shape[1] - new_unpad[0], new_shape[0] - new_unpad[1]  # wh padding
@@ -831,6 +891,7 @@ def letterbox(img, new_shape=(640, 640), color=(114, 114, 114), auto=True, scale
         new_unpad = (new_shape[1], new_shape[0])
         ratio = new_shape[1] / shape[1], new_shape[0] / shape[0]  # width, height ratios
 
+    # 图片两段需要填充的宽度
     dw /= 2  # divide padding into 2 sides
     dh /= 2
 
@@ -838,6 +899,7 @@ def letterbox(img, new_shape=(640, 640), color=(114, 114, 114), auto=True, scale
         img = cv2.resize(img, new_unpad, interpolation=cv2.INTER_LINEAR)
     top, bottom = int(round(dh - 0.1)), int(round(dh + 0.1))
     left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
+    # 进行填充
     img = cv2.copyMakeBorder(img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color)  # add border
     return img, ratio, (dw, dh)
 
@@ -851,16 +913,19 @@ def random_perspective(img, targets=(), segments=(), degrees=10, translate=.1, s
     width = img.shape[1] + border[1] * 2
 
     # Center
+    # 让图片放在正中央的位置，在进行缩放等处理
     C = np.eye(3)
     C[0, 2] = -img.shape[1] / 2  # x translation (pixels)
     C[1, 2] = -img.shape[0] / 2  # y translation (pixels)
 
     # Perspective
+    # 透视
     P = np.eye(3)
     P[2, 0] = random.uniform(-perspective, perspective)  # x perspective (about y)
     P[2, 1] = random.uniform(-perspective, perspective)  # y perspective (about x)
 
     # Rotation and Scale
+    # 旋转和缩放
     R = np.eye(3)
     a = random.uniform(-degrees, degrees)
     # a += random.choice([-180, -90, 0, 90])  # add 90deg rotations to small rotations
@@ -869,16 +934,19 @@ def random_perspective(img, targets=(), segments=(), degrees=10, translate=.1, s
     R[:2] = cv2.getRotationMatrix2D(angle=a, center=(0, 0), scale=s)
 
     # Shear
+    # 错切
     S = np.eye(3)
     S[0, 1] = math.tan(random.uniform(-shear, shear) * math.pi / 180)  # x shear (deg)
     S[1, 0] = math.tan(random.uniform(-shear, shear) * math.pi / 180)  # y shear (deg)
 
     # Translation
+    # 平移
     T = np.eye(3)
     T[0, 2] = random.uniform(0.5 - translate, 0.5 + translate) * width  # x translation (pixels)
     T[1, 2] = random.uniform(0.5 - translate, 0.5 + translate) * height  # y translation (pixels)
 
     # Combined rotation matrix
+    # @ ：线性代数的矩阵乘法操作， M， 变换矩阵
     M = T @ S @ R @ P @ C  # order of operations (right to left) is IMPORTANT
     if (border[0] != 0) or (border[1] != 0) or (M != np.eye(3)).any():  # image changed
         if perspective:
@@ -893,6 +961,8 @@ def random_perspective(img, targets=(), segments=(), degrees=10, translate=.1, s
     # ax[1].imshow(img2[:, :, ::-1])  # warped
 
     # Transform label coordinates
+
+    # 相对应的，labels也要进行转换。
     n = len(targets)
     if n:
         use_segments = any(x.any() for x in segments)
@@ -910,20 +980,26 @@ def random_perspective(img, targets=(), segments=(), degrees=10, translate=.1, s
 
         else:  # warp boxes
             xy = np.ones((n * 4, 3))
+            # targets 坐标形式是[xmin, ymin, xmax, ymax]  下边这句话就是提取真实框的四个点
             xy[:, :2] = targets[:, [1, 2, 3, 4, 1, 4, 3, 2]].reshape(n * 4, 2)  # x1y1, x2y2, x1y2, x2y1
+            # .T表示矩阵转置
             xy = xy @ M.T  # transform
+
             xy = (xy[:, :2] / xy[:, 2:3] if perspective else xy[:, :2]).reshape(n, 8)  # perspective rescale or affine
 
             # create new boxes
+            # 得到新的真实框
             x = xy[:, [0, 2, 4, 6]]
             y = xy[:, [1, 3, 5, 7]]
             new = np.concatenate((x.min(1), y.min(1), x.max(1), y.max(1))).reshape(4, n).T
 
             # clip
+            # clip boxes 将超出图像边界的真实框的坐标赋予0或图像边长
             new[:, [0, 2]] = new[:, [0, 2]].clip(0, width)
             new[:, [1, 3]] = new[:, [1, 3]].clip(0, height)
 
         # filter candidates
+        # 筛选掉过于狭窄，高或宽小于2, 处理之后的真实框的面积要比处理之前真实框的面积<=0.1的真实框
         i = box_candidates(box1=targets[:, 1:5].T * s, box2=new.T, area_thr=0.01 if use_segments else 0.10)
         targets = targets[i]
         targets[:, 1:5] = new[i]

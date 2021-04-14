@@ -25,6 +25,7 @@ def autopad(k, p=None):  # kernel, padding
 
 def DWConv(c1, c2, k=1, s=1, act=True):
     # Depthwise convolution
+    # math.gcd() 返回最大公约数
     return Conv(c1, c2, k, s, g=math.gcd(c1, c2), act=act)
 
 
@@ -37,9 +38,11 @@ class Conv(nn.Module):
         self.act = nn.SiLU() if act is True else (act if isinstance(act, nn.Module) else nn.Identity())
 
     def forward(self, x):
+        # 前行计算
         return self.act(self.bn(self.conv(x)))
 
     def fuseforward(self, x):
+        # 前向融合计算
         return self.act(self.conv(x))
 
 
