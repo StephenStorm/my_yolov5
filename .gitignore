@@ -36,6 +36,9 @@ data/*
 !data/trainvalno5k.shapes
 !data/*.sh
 
+!data/visdrone_1.yaml
+!data/scripts/visdrone_1.py
+
 pycocotools/*
 results*.txt
 gcp_test*.sh
