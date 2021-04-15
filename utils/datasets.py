@@ -154,6 +154,12 @@ class LoadImages:  # for inference
         return self
 
     def __next__(self):
+        '''
+        返回值是path, img, img0, self.cap
+        图片路径， letterbox padded resize img, 原始图片， cap = cv2.videoCapture();
+        
+        '''
+        
         if self.count == self.nf:
             raise StopIteration
         path = self.files[self.count]
