@@ -170,8 +170,8 @@ class ComputeLoss:
     def build_targets(self, p, targets):
         # Build targets for compute_loss(), input targets(image,class,x,y,w,h)
         """
-        p: 网络输出[batch_size, num_anchors, h, w, bbox + 1 + cls] * 3
-        target: labels [num_labels, image_index + cls_id + bbox]
+        p: 网络输出[batch_size, num_anchors, h, w, nc+5(bbox + 1 + cls)] * 3
+        target: labels [num_labels, image_index + cls_id + bbox(xywh)]
         model: yolov5
 
         这个函数用来构建计算损失的目标值
