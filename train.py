@@ -629,6 +629,7 @@ if __name__ == '__main__':
 
     # Resume
     wandb_run = check_wandb_resume(opt)
+    # wandb_run = False
     if opt.resume and not wandb_run:  # resume an interrupted run
         ckpt = opt.resume if isinstance(opt.resume, str) else get_latest_run()  # specified or most recent path
         assert os.path.isfile(ckpt), 'ERROR: --resume checkpoint does not exist'
