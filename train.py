@@ -686,7 +686,7 @@ if __name__ == '__main__':
                 'warmup_epochs': (1, 0.0, 5.0),  # warmup epochs (fractions ok)
                 'warmup_momentum': (1, 0.0, 0.95),  # warmup initial momentum
                 'warmup_bias_lr': (1, 0.0, 0.2),  # warmup initial bias lr
-                'box': (1, 0.02, 0.2),  # box loss gain
+                'box': (1, 0.02, 0.2),  # box loss gain 各种损失的权重
                 'cls': (1, 0.2, 4.0),  # cls loss gain
                 'cls_pw': (1, 0.5, 2.0),  # cls BCELoss positive_weight
                 'obj': (1, 0.2, 4.0),  # obj loss gain (scale with pixels)

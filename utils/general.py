@@ -419,7 +419,7 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, classes=Non
     Returns:
          list of detections, on (n,6) tensor per image [xyxy, conf, cls]
     """
-
+    # prediction[batch_size, num_anchors(3), x,y,w,h,confidence, class]
     nc = prediction.shape[2] - 5  # number of classes
     xc = prediction[..., 4] > conf_thres  # candidates
 
@@ -453,6 +453,7 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, classes=Non
             continue
 
         # Compute conf
+        # class_cond[5:] = class_cond * cond[4]
         x[:, 5:] *= x[:, 4:5]  # conf = obj_conf * cls_conf
 
         # Box (center x, center y, width, height) to (x1, y1, x2, y2)
