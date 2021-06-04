@@ -70,15 +70,12 @@ def detect(save_img=False):
 
         # Inference
         t1 = time_synchronized()
+        # print(img.size()) (1,3,352,608)
         pred = model(img, augment=opt.augment)[0]
 
         # Apply NMS
         pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres, classes=opt.classes, agnostic=opt.agnostic_nms)
         t2 = time_synchronized()
-
-        #  stephen add 
-        print(pred.shape)
-        print(pred[0])
 
         # Apply Classifier
         if classify:
