@@ -4,6 +4,7 @@ depth_multiple: 0.33  # model depth multiple
 width_multiple: 0.50  # layer channel multiple
 
 # anchors
+# 需要注意的是，这个anchor的尺寸是640 * 640分辨率下的图形尺寸。
 anchors:
   - [10,13, 16,30, 33,23]  # P3/8
   - [30,61, 62,45, 59,119]  # P4/16

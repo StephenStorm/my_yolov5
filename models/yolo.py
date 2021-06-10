@@ -59,7 +59,7 @@ class Detect(nn.Module):
                 y[..., 0:2] = (y[..., 0:2] * 2. - 0.5 + self.grid[i]) * self.stride[i]  # xy
                 y[..., 2:4] = (y[..., 2:4] * 2) ** 2 * self.anchor_grid[i]  # wh
                 # 0, 1 : x, y ,  2, 3: w, h
-                print('y.shape{}'.format(y.view(bs, -1, self.no).shape))
+                # print('y.shape{}'.format(y.view(bs, -1, self.no).shape))
                 z.append(y.view(bs, -1, self.no)) # bs * n * 85, n = anchors_per_cell * ny * nx
 
         return x if self.training else (torch.cat(z, 1), x)

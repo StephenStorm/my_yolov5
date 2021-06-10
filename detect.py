@@ -73,9 +73,16 @@ def detect(save_img=False):
         # print(img.size()) (1,3,352,608)
         pred = model(img, augment=opt.augment)[0]
 
+        # stephen add
+        print('before nms')
+
+        print(type(pred), pred[0].shape) # list, 128520 * 13  input_size = 1920
         # Apply NMS
         pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres, classes=opt.classes, agnostic=opt.agnostic_nms)
         t2 = time_synchronized()
+        # stephen add
+        print(pred[0].shape) # (n * 6)  n is the number of targets
+        
 
         # Apply Classifier
         if classify:
