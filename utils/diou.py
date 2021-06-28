@@ -1,3 +1,10 @@
+import time
+import os
+
+import torch
+from utils.general import xywh2xyxy
+
+
 def intersect(box_a, box_b):
 
     n = box_a.size(0)
@@ -64,12 +71,12 @@ def jaccard_diou(box_a, box_b, iscrowd:bool=False):
     return out if use_batch else out.squeeze(0)
 
 # For batch mode Cluster-Weighted NMS
-def non_max_suppression_diou(prediction, conf_thres=0.1, iou_thres=0.6, max_box=1500, merge=False, classes=None, agnostic=False):
+def non_max_suppression_diou(prediction, conf_thres=0.23, iou_thres=0.6, max_box=300, merge=False, classes=None, agnostic=False):
     """Performs Non-Maximum Suppression (NMS) on inference results
     Returns:
          detections with shape: nx6 (x1, y1, x2, y2, conf, cls)
     """
-
+    print('fonf_thresh: {}'.format(conf_thres))
     nc = prediction[0].shape[1] - 5  # number of classes
     xc = prediction[..., 4] > conf_thres  # candidates
 
@@ -141,7 +148,7 @@ def non_max_suppression_diou(prediction, conf_thres=0.1, iou_thres=0.6, max_box=
         if A.equal(B)==True:
             break
     keep = (maxA <= iou_thres) 
-    weights = (B*(B>0.8) + torch.eye(max_box).cuda().expand(batch_size,max_box,max_box)) * (pred1[:,:,4].reshape((batch_size,1,max_box)))
+    weights = (B*(B>iou_thres) + torch.eye(max_box).cuda().expand(batch_size,max_box,max_box)) * (pred1[:,:,4].reshape((batch_size,1,max_box)))
     pred1[:,:, :4]=torch.matmul(weights,pred1[:,:,:4]) / weights.sum(2, keepdim=True)   # weighted coordinates
 
     for jj in range(batch_size):

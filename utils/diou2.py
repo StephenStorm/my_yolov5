@@ -3,7 +3,7 @@ import os, sys
 from torch.nn import functional as F
 
 import numpy as np
-from packaging import version
+# from packaging import version
 
 
 __all__ = [
@@ -14,12 +14,15 @@ __all__ = [
 ]
 
 
-if version.parse(torch.__version__) >= version.parse('1.5.0'):
-    def _true_divide(dividend, divisor):
-        return torch.true_divide(dividend, divisor)
-else:
-    def _true_divide(dividend, divisor):
-        return dividend / divisor
+# if version.parse(torch.__version__) >= version.parse('1.5.0'):
+#     def _true_divide(dividend, divisor):
+#         return torch.true_divide(dividend, divisor)
+# else:
+#     def _true_divide(dividend, divisor):
+#         return dividend / divisor
+
+def _true_divide(dividend, divisor):
+    return torch.true_divide(dividend, divisor)
 
 def bboxes_iou(bboxes_a, bboxes_b, fmt='voc', iou_type='iou'):
     """Calculate the Intersection of Unions (IoUs) between bounding boxes.
@@ -41,6 +44,7 @@ def bboxes_iou(bboxes_a, bboxes_b, fmt='voc', iou_type='iou'):
     from: https://github.com/chainer/chainercv
     """
     if bboxes_a.shape[1] != 4 or bboxes_b.shape[1] != 4:
+        print(bboxes_a.shape, bboxes_b.shape)
         raise IndexError
 
     N, K = bboxes_a.shape[0], bboxes_b.shape[0]
@@ -195,3 +199,48 @@ def bboxes_diou(bboxes_a, bboxes_b, fmt='voc'):
 
 def bboxes_ciou(bboxes_a, bboxes_b, fmt='voc'):
     return bboxes_iou(bboxes_a, bboxes_b, fmt, 'ciou')
+
+
+
+
+def Weighted_cluster_nms(boxes, scores, NMS_threshold:float=0.5):
+    '''
+    Arguments:
+        boxes (Tensor[N, 4])
+        scores (Tensor[N, ])
+    Returns:
+        Fast NMS results
+    '''
+    print(boxes.shape)
+    # print(boxes[])
+    n = scores.shape[0]
+    scores, idx = scores.sort(descending=True)
+    # print(scores)
+    # print(idx)
+    boxes = boxes[idx]   # 对框按得分降序排列
+    iou = bboxes_iou(boxes, boxes, 'voc', 'iou').triu_(diagonal=1)  # IoU矩阵，上三角化,diagnoal = 1 ,表示去掉对角线元素。只要上三角
+    C = iou
+    for i in range(200):    
+        A=C
+        maxA = A.max(dim=0)[0]   # 列最大值向量
+        E = (maxA < NMS_threshold).float().unsqueeze(1).expand_as(A)   # 对角矩阵E的替代
+        C = iou.mul(E)     # 按元素相乘
+        if A.equal(C)==True:     # 终止条件
+            break
+    # _, keep = maxA.argmax()
+    keep = maxA < NMS_threshold  # 列最大值向量，二值化
+    print(keep.sum())
+    return keep
+    # weights = (C*(C>NMS_threshold).float() + torch.eye(n).cuda()) * (scores.reshape((1,n)))
+    # xx1 = boxes[:,0].expand(n,n)
+    # yy1 = boxes[:,1].expand(n,n)
+    # xx2 = boxes[:,2].expand(n,n)
+    # yy2 = boxes[:,3].expand(n,n)
+
+    # weightsum=weights.sum(dim=1)         # 坐标加权平均
+    # xx1 = (xx1*weights).sum(dim=1)/(weightsum)
+    # yy1 = (yy1*weights).sum(dim=1)/(weightsum)
+    # xx2 = (xx2*weights).sum(dim=1)/(weightsum)
+    # yy2 = (yy2*weights).sum(dim=1)/(weightsum)
+    # boxes = torch.stack([xx1, yy1, xx2, yy2], 1)
+    # return boxes[keep], scores[keep]

@@ -709,7 +709,8 @@ def load_mosaic(self, index):
 
     labels4, segments4 = [], []
     s = self.img_size
-    # 随机选取 mosaic的中心点
+    # 随机选取 mosaic的中心点 random.uniform(x, y) 随机生成一个实数，在[x, y] 之间。
+    # mosaic_border = -img_size // 2;
     yc, xc = [int(random.uniform(-x, 2 * s + x)) for x in self.mosaic_border]  # mosaic center x, y
     # 随机添加剩余3张图像序列
     indices = [index] + random.choices(self.indices, k=3)  # 3 additional image indices

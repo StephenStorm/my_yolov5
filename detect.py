@@ -10,9 +10,11 @@ from numpy import random
 from models.experimental import attempt_load
 from utils.datasets import LoadStreams, LoadImages
 from utils.general import check_img_size, check_requirements, check_imshow, non_max_suppression, apply_classifier, \
-    scale_coords, xyxy2xywh, strip_optimizer, set_logging, increment_path
+    scale_coords, xyxy2xywh, strip_optimizer, set_logging, increment_path, non_max_suppression_cluster_diou
+from utils.diou import non_max_suppression_diou
 from utils.plots import plot_one_box
 from utils.torch_utils import select_device, load_classifier, time_synchronized
+
 
 
 def detect(save_img=False):
@@ -74,14 +76,16 @@ def detect(save_img=False):
         pred = model(img, augment=opt.augment)[0]
 
         # stephen add
-        print('before nms')
-
-        print(type(pred), pred[0].shape) # list, 128520 * 13  input_size = 1920
+        # print('before nms')
+        # print('after inference:')
+        # print(type(pred), pred.shape) # torch.tensor, 1 * 128520 * 13  input_size = 1920
         # Apply NMS
-        pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres, classes=opt.classes, agnostic=opt.agnostic_nms)
+        # pred = non_max_suppression_cluster_diou(pred, opt.conf_thres, opt.iou_thres, classes=opt.classes, agnostic=opt.agnostic_nms)
+        pred = non_max_suppression_diou(pred, opt.conf_thres, opt.iou_thres, classes=opt.classes, agnostic=opt.agnostic_nms)
+        # pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres, classes=opt.classes, agnostic=opt.agnostic_nms)
         t2 = time_synchronized()
         # stephen add
-        print(pred[0].shape) # (n * 6)  n is the number of targets
+        # print(pred[0].shape) # (n * 6)  n is the number of targets
         
 
         # Apply Classifier
@@ -119,7 +123,7 @@ def detect(save_img=False):
 
                     if save_img or view_img:  # Add bbox to image
                         label = f'{names[int(cls)]} {conf:.2f}'
-                        plot_one_box(xyxy, im0, label=label, color=colors[int(cls)], line_thickness=3)
+                        plot_one_box(xyxy, im0, label=label, color=colors[int(cls)], line_thickness=1)
 
             # Print time (inference + NMS)
             print(f'{s}Done. ({t2 - t1:.3f}s)')

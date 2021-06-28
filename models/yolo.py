@@ -49,7 +49,7 @@ class Detect(nn.Module):
             x[i] = x[i].view(bs, self.na, self.no, ny, nx).permute(0, 1, 3, 4, 2).contiguous()
             # bs, na, ny, nx, no
             # no = classes + 5
-            print('x.shape{}'.format(x[i].shape))
+            # print('x.shape{}'.format(x[i].shape))
 
             if not self.training:  # inference
                 if self.grid[i].shape[2:4] != x[i].shape[2:4]:
