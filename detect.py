@@ -80,8 +80,8 @@ def detect(save_img=False):
         # print('after inference:')
         # print(type(pred), pred.shape) # torch.tensor, 1 * 128520 * 13  input_size = 1920
         # Apply NMS
-        # pred = non_max_suppression_cluster_diou(pred, opt.conf_thres, opt.iou_thres, classes=opt.classes, agnostic=opt.agnostic_nms)
-        pred = non_max_suppression_diou(pred, opt.conf_thres, opt.iou_thres, classes=opt.classes, agnostic=opt.agnostic_nms)
+        pred = non_max_suppression_cluster_diou(pred, opt.conf_thres, opt.iou_thres, classes=opt.classes, agnostic=opt.agnostic_nms)
+        # pred = non_max_suppression_diou(pred, opt.conf_thres, opt.iou_thres, classes=opt.classes, agnostic=opt.agnostic_nms)
         # pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres, classes=opt.classes, agnostic=opt.agnostic_nms)
         t2 = time_synchronized()
         # stephen add
